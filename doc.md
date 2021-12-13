@@ -17,3 +17,10 @@ python textract_labels.py
 python train_task.py
 
 ```
+
+### 4. Dataset Path
+```
+a) /data/gaurav/all_data.zip : This contains dataset required for training Easyocr
+b) /data/gaurav/total_img.zip: This contains images that we converted from pdfs. We use this data to achieve above dataset.
+
+```
