@@ -180,6 +180,7 @@ def get_recognizer(recog_network, network_params, character,\
     else:
         model = torch.nn.DataParallel(model).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
+        torch.save(model.state_dict(),'pre_mode.pth',_use_new_zipfile_serialization=False)
 
     return model, converter
 

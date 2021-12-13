@@ -17,6 +17,10 @@ from PIL import Image
 from logging import getLogger
 import yaml
 
+from .customs.blending_img import blending,get_missing_bbox
+from .customs.tensseract import filter_by_tenssract
+
+
 if sys.version_info[0] == 2:
     from io import open
     from six.moves.urllib.request import urlretrieve
@@ -175,6 +179,7 @@ class Reader(object):
                     model = recognition_models['gen2']['latin_g2']
                     recog_network = 'generation2'
             self.character = model['characters']
+            print('self.character',self.character)
 
             model_path = os.path.join(self.model_storage_directory, model['filename'])
             # check recognition model file
@@ -206,7 +211,7 @@ class Reader(object):
             available_lang = recog_config['lang_list']
             self.setModelLanguage(recog_network, lang_list, available_lang, available_lang)
             #char_file = os.path.join(self.user_network_directory, recog_network+ '.txt')
-            self.character = recog_config['character_list']
+            self.character =' !"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~ªÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿĀāĂăĄąĆćČčĎďĐđĒēĖėĘęĚěĞğĨĩĪīĮįİıĶķĹĺĻļĽľŁłŃńŅņŇňŒœŔŕŘřŚśŞşŠšŤťŨũŪūŮůŲųŸŹźŻżŽžƏƠơƯưȘșȚțə̇ḌḍḶḷṀṁṂṃṄṅṆṇṬṭẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẶặẸẹẺẻẼẽẾếỀềỂểỄễỆệỈỉỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỴỵỶỷỸỹ€'
             model_file = recog_network+ '.pth'
             model_path = os.path.join(self.model_storage_directory, model_file)
             self.setLanguageList(lang_list, None)
@@ -267,8 +272,7 @@ class Reader(object):
     def detect(self, img, min_size = 20, text_threshold = 0.7, low_text = 0.4,\
                link_threshold = 0.4,canvas_size = 2560, mag_ratio = 1.,\
                slope_ths = 0.1, ycenter_ths = 0.5, height_ths = 0.5,\
-               width_ths = 0.5, add_margin = 0.1, reformat=True, optimal_num_chars=None):
-
+               width_ths = 0.5, add_margin = 0.1, reformat=True, optimal_num_chars=None,using_blending=True,using_tenserac=True):
         if reformat:
             img, img_cv_grey = reformat_input(img)
 
@@ -276,19 +280,39 @@ class Reader(object):
                                     text_threshold, link_threshold, low_text,
                                     False, self.device, optimal_num_chars)
 
+        if using_blending:
+            blend_img=blending(img.copy())
+            blend_bboxes = get_textbox(self.detector, blend_img, canvas_size, mag_ratio,
+                    text_threshold, link_threshold, low_text,
+                    False, self.device, optimal_num_chars)
+            blend_bboxes, _ = group_text_box(blend_bboxes[0], slope_ths,
+                                                    ycenter_ths, height_ths,
+                                                    width_ths, add_margin,
+                                                    (optimal_num_chars is None))
+
+            text_box_list=get_missing_bbox(blend_bboxes,text_box_list)
+
+
+
         horizontal_list_agg, free_list_agg = [], []
         for text_box in text_box_list:
             horizontal_list, free_list = group_text_box(text_box, slope_ths,
                                                         ycenter_ths, height_ths,
                                                         width_ths, add_margin,
                                                         (optimal_num_chars is None))
+            
             if min_size:
-                horizontal_list = [i for i in horizontal_list if max(
-                    i[1] - i[0], i[3] - i[2]) > min_size]
+                big_horizontal_list = [i for i in horizontal_list if max(i[1] - i[0], i[3] - i[2]) > min_size]
                 free_list = [i for i in free_list if max(
                     diff([c[0] for c in i]), diff([c[1] for c in i])) > min_size]
-            horizontal_list_agg.append(horizontal_list)
+
+                big_horizontal_list.extend([[i[0]-int(0.3*(i[1] - i[0])),i[1]+int(0.3*(i[1] - i[0])),i[2]-int(0.2*(i[3] - i[2])),i[3]+int(0.2*(i[3] - i[2]))] for i in horizontal_list if max(
+                    i[1] - i[0], i[3] - i[2]) <= min_size and min(i[1] - i[0], i[3] - i[2])>0])
+            horizontal_list_agg.append(big_horizontal_list)
             free_list_agg.append(free_list)
+
+        if using_tenserac:
+            horizontal_list_agg=filter_by_tenssract(img,horizontal_list_agg)
 
         return horizontal_list_agg, free_list_agg
 
@@ -375,14 +399,15 @@ class Reader(object):
                  workers = 0, allowlist = None, blocklist = None, detail = 1,\
                  rotation_info = None, paragraph = False, min_size = 20,\
                  contrast_ths = 0.1,adjust_contrast = 0.5, filter_ths = 0.003,\
-                 text_threshold = 0.7, low_text = 0.4, link_threshold = 0.4,\
-                 canvas_size = 2560, mag_ratio = 1.,\
+                 text_threshold = 0.4, low_text = 0.4, link_threshold = 0.4,\
+                 canvas_size = 2560, mag_ratio = 1.5,\
                  slope_ths = 0.1, ycenter_ths = 0.5, height_ths = 0.5,\
-                 width_ths = 0.5, y_ths = 0.5, x_ths = 1.0, add_margin = 0.1, output_format='standard'):
+                 width_ths = 0.5, y_ths = 0.5, x_ths = 1.0, add_margin = 0.1, output_format='standard',using_blending=True,using_tenserac=True):
         '''
         Parameters:
         image: file path or numpy-array or a byte stream object
         '''
+
         img, img_cv_grey = reformat_input(image)
 
         horizontal_list, free_list = self.detect(img, min_size, text_threshold,\
@@ -390,7 +415,9 @@ class Reader(object):
                                                  canvas_size, mag_ratio,\
                                                  slope_ths, ycenter_ths,\
                                                  height_ths,width_ths,\
-                                                 add_margin, False)
+                                                 add_margin, False,using_blending=using_blending,using_tenserac=using_tenserac)
+
+
         # get the 1st result from hor & free list as self.detect returns a list of depth 3
         horizontal_list, free_list = horizontal_list[0], free_list[0]
         result = self.recognize(img_cv_grey, horizontal_list, free_list,\

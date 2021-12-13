@@ -10,6 +10,7 @@ import torch.optim as optim
 import torch.utils.data
 from torch.cuda.amp import autocast, GradScaler
 import numpy as np
+from tqdm import tqdm 
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
 from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
@@ -220,8 +221,10 @@ def train(opt, show_number = 2, amp=False):
             optimizer.step()
         loss_avg.add(cost)
 
+        print('training ..... {}/389 ',i)
         # validation part
         if (i % opt.valInterval == 0) and (i!=0):
+            i=0
             print('training time: ', time.time()-t1)
             t1=time.time()
             elapsed_time = time.time() - start_time
